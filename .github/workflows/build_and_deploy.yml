@@ -1,0 +1,95 @@
+# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More GitHub Actions for Azure: https://github.com/Azure/actions
+
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: 8.0.x # The .NET SDK version to use
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  checks: write
+
+jobs:
+  build:
+    name: CI-${{matrix.os}}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Install task
+      uses: arduino/setup-task@v2
+
+    - name: Install dependencies
+      run: dotnet restore
+      working-directory: backend/src/Todo.Api
+      
+    - name: Build   
+      run: dotnet build --configuration Release --no-restore
+      working-directory: backend/src/Todo.Api
+    
+    - name: Test
+      run: dotnet test
+      working-directory: backend/test/Todo.Api.Tests
+
+    - name: Generate test report
+      uses: dorny/test-reporter@v1
+      if: success() || failure()
+      with:
+        name: ${{ matrix.os }} Test Results
+        path: "**/TestResults/net6.0/Todo.Api.Tests.trx"
+        reporter: dotnet-trx
+        
+    - name: Generate test coverage report
+      uses: 5monkeys/cobertura-action@master
+      if: success() || failure()
+      with:
+        path: "**/TestResults/*/*.xml"
+        link_missing_lines: true
+        minimum_coverage: 75
+        report_name: ${{matrix.os}} test coverage report
+        show_line: true
+        show_class_names: true
+        show_missing: true
+        skip_covered: false
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: 'Production'
+      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+    
+    steps:
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: .net-app
+      
+      - name: Deploy to Azure Web App
+        id: deploy-to-webapp
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'maxwallwey'
+          slot-name: 'Production'
+          package: .
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_709371A4A75E46A0B76B7D3D6DA757D9 }}
